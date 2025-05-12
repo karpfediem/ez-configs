@@ -33,7 +33,7 @@ let
       (name: configModule:
       let
         hostSettings = hosts.${name} or defaultHost;
-        inherit (hostSettings) importDefault;
+        inherit (hostSettings) importDefault extraModules;
         # Convert a list of strings into an attribute set with identical names and values.
         userHomeModules =
           if isList hostSettings.userHomeModules
@@ -80,6 +80,7 @@ let
           configModule
           { networking.hostName = lib.mkDefault "${name}"; }
         ] ++ optionals importDefault [ (ezModules.default or { }) ]
+        ++ extraModules
         ++ optionals (userHomeModules != { }) [
           hmModule
           ({ pkgs, ... }: {
@@ -232,6 +233,15 @@ let
         type = types.bool;
         description = ''
           Whether to import the default module for this host.
+        '';
+      };
+
+      extraModules = lib.mkOption {
+        type = types.listOf types.anything;
+        default = [];
+        description = ''
+          List of additional nixosModules to import for this host.
+          Each entry should be a NixOS module (an attrset with options and config).
         '';
       };
 
