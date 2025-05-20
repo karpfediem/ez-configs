@@ -532,8 +532,8 @@ in
         userModules = readModules { dir = cfg.home.configurationsDirectory; entryPoint = cfg.home.configurationEntryPoint; };
         ezHomeModules = homeModules;
         extraSystemModules = cfg.darwin.extraModules;
-        inherit (cfg.darwin) specialArgs extraModules;
-        inherit (cfg.home) extraSpecialArgs users;
+        inherit (cfg.darwin) specialArgs;
+        inherit (cfg.home) extraSpecialArgs users extraModules;
       }
       cfg.darwin.hosts;
   };
