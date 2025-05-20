@@ -265,7 +265,6 @@ let
         type = types.listOf types.anything;
         description = ''
           List of additional nixosModules to import for this host.
-          This setting overwrites the top level extraModules.
         '';
       };
     };
@@ -370,7 +369,8 @@ let
       type = types.listOf types.anything;
       description = ''
         List of additional ${configType}Modules to import for all hosts.
-        This setting overwrites the top level extraModules.
+        This setting defaults to the top level extraModules.
+        Overwrite it here if you require a different list of ${configType}Modules.
       '';
     };
 
