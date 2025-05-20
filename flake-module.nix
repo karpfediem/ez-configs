@@ -11,8 +11,8 @@ let
   # Creates a list of imports to include for a given user.
   # This is used in both systemsWith and userConfigs,
   # so it's convinient to have it exported as a top level function
-  userImports = { stdenv, userModules, ezModules, user, importDefault }:
-    [ (userModules.${user} or { }) ] ++ # user module
+  userImports = { stdenv, userModules, ezModules, extraModules, user, importDefault }:
+    extraModules ++ [ (userModules.${user} or { }) ] ++ # user module
     optionals importDefault ([ (ezModules.default or { }) ] ++ # default module
     optionals stdenv.isDarwin [ (ezModules.darwin or { }) ] ++ # default darwin module
     optionals stdenv.isLinux [ (ezModules.linux or { }) ]); # default linux module;
@@ -27,13 +27,15 @@ let
     , extraSpecialArgs
     , userModules
     , ezHomeModules
+    , extraSystemModules
+    , extraModules
     , users
     }: hosts:
     mapAttrs
       (name: configModule:
       let
         hostSettings = hosts.${name} or defaultHost;
-        inherit (hostSettings) importDefault extraModules;
+        inherit (hostSettings) importDefault;
         # Convert a list of strings into an attribute set with identical names and values.
         userHomeModules =
           if isList hostSettings.userHomeModules
@@ -76,12 +78,11 @@ let
       in
       systemBuilder {
         specialArgs = specialArgs // { inherit ezModules; };
-        modules = [
+        modules = extraSystemModules ++ hostSettings.extraModules ++ [
           configModule
           { networking.hostName = lib.mkDefault "${name}"; }
         ] ++ optionals importDefault [ (ezModules.default or { }) ]
-        ++ extraModules
-        ++ optionals (userHomeModules != { }) [
+          ++ optionals (userHomeModules != { }) [
           hmModule
           ({ pkgs, ... }: {
             home-manager = {
@@ -96,7 +97,7 @@ let
                       imports = userImports {
                         inherit (pkgs) stdenv;
                         inherit (userSettings) importDefault;
-                        inherit user userModules;
+                        inherit user userModules extraModules;
                         ezModules = ezHomeModules;
                       };
                     }
@@ -115,7 +116,7 @@ let
       config.flake.darwinConfigurations);
 
   # Creates an attrset of home manager confgurations for each user on each host.
-  userConfigs = { ezModules, userModules, extraSpecialArgs, defaultUser }: users:
+  userConfigs = { ezModules, userModules, extraModules, extraSpecialArgs, defaultUser }: users:
     concatMapAttrs
       (user: configModule:
         let
@@ -129,7 +130,7 @@ let
             if nameFunction == null
             then host: "${user}@${host}"
             else nameFunction;
-          modules = stdenv: userImports { inherit stdenv importDefault user ezModules userModules; };
+          modules = stdenv: userImports { inherit stdenv importDefault user ezModules extraModules userModules; };
           homeManagerConfiguration =
             if inputs ? home-manager
             then inputs.home-manager.lib.homeManagerConfiguration
@@ -236,15 +237,6 @@ let
         '';
       };
 
-      extraModules = lib.mkOption {
-        type = types.listOf types.anything;
-        default = [];
-        description = ''
-          List of additional nixosModules to import for this host.
-          Each entry should be a NixOS module (an attrset with options and config).
-        '';
-      };
-
       userHomeModules = mkOption {
         default = [ ];
         type = types.either (types.listOf types.str) (types.attrsOf types.str);
@@ -265,6 +257,15 @@ let
           When this option is set, the `home-manager.extraSpecialArgs` option
           is also set to the one it would recieve in homeManagerConfigurations
           output, and the appropriate homeManager module is imported.
+        '';
+      };
+
+      extraModules = mkOption {
+        default = cfg.extraModules;
+        type = types.listOf types.anything;
+        description = ''
+          List of additional nixosModules to import for this host.
+          This setting overwrites the top level extraModules.
         '';
       };
     };
@@ -361,6 +362,15 @@ let
       type = types.attrsOf types.anything;
       description = ''
         Extra arguments to pass to all ${configType}Modules before exporting them.
+      '';
+    };
+
+    extraModules = mkOption {
+      default = cfg.extraModules;
+      type = types.listOf types.anything;
+      description = ''
+        List of additional ${configType}Modules to import for all hosts.
+        This setting overwrites the top level extraModules.
       '';
     };
 
@@ -469,6 +479,15 @@ in
       '';
     };
 
+    extraModules = mkOption {
+      type = types.listOf types.anything;
+      example = literalExpression "[ self.nixosModules.nixpkgs ]";
+      default = [ ];
+      description = ''
+        List of additional modules to import for all hosts and all configurations.
+      '';
+    };
+
     home = configurationOptions "home";
 
     nixos = configurationOptions "nixos";
@@ -483,35 +502,37 @@ in
 
     homeConfigurations = userConfigs
       {
-        userModules = readModules { dir=cfg.home.configurationsDirectory; entryPoint=cfg.home.configurationEntryPoint; };
+        userModules = readModules { dir = cfg.home.configurationsDirectory; entryPoint = cfg.home.configurationEntryPoint; };
         defaultUser = defaultSubmodule userOptions;
         ezModules = homeModules;
-        inherit (cfg.home) extraSpecialArgs;
+        inherit (cfg.home) extraSpecialArgs extraModules;
       }
       cfg.home.users;
 
     nixosConfigurations = systemsWith
       {
         os = "linux";
-        hostModules = readModules { dir=cfg.nixos.configurationsDirectory; entryPoint=cfg.nixos.configurationEntryPoint; };
+        hostModules = readModules { dir = cfg.nixos.configurationsDirectory; entryPoint = cfg.nixos.configurationEntryPoint; };
         defaultHost = defaultSubmoduleAttr ((configurationOptions "nixos").hosts.type);
         ezModules = nixosModules;
-        userModules = readModules { dir=cfg.home.configurationsDirectory; entryPoint=cfg.home.configurationEntryPoint; };
+        userModules = readModules { dir = cfg.home.configurationsDirectory; entryPoint = cfg.home.configurationEntryPoint; };
         ezHomeModules = homeModules;
+        extraSystemModules = cfg.nixos.extraModules;
         inherit (cfg.nixos) specialArgs;
-        inherit (cfg.home) extraSpecialArgs users;
+        inherit (cfg.home) extraSpecialArgs users extraModules;
       }
       cfg.nixos.hosts;
 
     darwinConfigurations = systemsWith
       {
         os = "darwin";
-        hostModules = readModules { dir=cfg.darwin.configurationsDirectory; entryPoint=cfg.darwin.configurationEntryPoint; };
+        hostModules = readModules { dir = cfg.darwin.configurationsDirectory; entryPoint = cfg.darwin.configurationEntryPoint; };
         defaultHost = defaultSubmoduleAttr ((configurationOptions "darwin").hosts.type);
         ezModules = darwinModules;
-        userModules = readModules { dir=cfg.home.configurationsDirectory; entryPoint=cfg.home.configurationEntryPoint; };
+        userModules = readModules { dir = cfg.home.configurationsDirectory; entryPoint = cfg.home.configurationEntryPoint; };
         ezHomeModules = homeModules;
-        inherit (cfg.darwin) specialArgs;
+        extraSystemModules = cfg.darwin.extraModules;
+        inherit (cfg.darwin) specialArgs extraModules;
         inherit (cfg.home) extraSpecialArgs users;
       }
       cfg.darwin.hosts;
